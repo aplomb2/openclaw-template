@@ -396,6 +396,71 @@ async function fetchPersonality() {
   return { personality: null, template: null };
 }
 
+// Environment variable for template ID
+const ONECLAW_TEMPLATE_ID = process.env.ONECLAW_TEMPLATE_ID?.trim() || null;
+
+// Apply template from environment variable (called on first startup)
+async function applyTemplateFromEnv() {
+  if (!ONECLAW_TEMPLATE_ID || !ONECLAW_API_URL) {
+    return false;
+  }
+
+  // Check if already applied (SOUL.md exists with content)
+  const soulPath = path.join(WORKSPACE_DIR, 'SOUL.md');
+  if (fs.existsSync(soulPath)) {
+    const content = fs.readFileSync(soulPath, 'utf8');
+    if (content.length > 100) {
+      console.log('[template] SOUL.md already exists, skipping template apply');
+      return true;
+    }
+  }
+
+  console.log(`[template] applying template: ${ONECLAW_TEMPLATE_ID}`);
+  
+  try {
+    // Fetch template content from API
+    const response = await fetch(`${ONECLAW_API_URL}/templates?id=${ONECLAW_TEMPLATE_ID}`);
+    if (!response.ok) {
+      console.error(`[template] fetch failed: ${response.status}`);
+      return false;
+    }
+    
+    const data = await response.json();
+    const template = data.template;
+    
+    if (!template) {
+      console.error('[template] template not found');
+      return false;
+    }
+    
+    // Write SOUL.md
+    if (template.soulMd) {
+      fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+      fs.writeFileSync(soulPath, template.soulMd, 'utf8');
+      console.log(`[template] wrote SOUL.md (${template.soulMd.length} chars)`);
+    }
+    
+    // Write memory files
+    if (template.memoryFiles && Array.isArray(template.memoryFiles)) {
+      for (const file of template.memoryFiles) {
+        if (file.path && file.content) {
+          const filePath = path.join(WORKSPACE_DIR, file.path);
+          const dir = path.dirname(filePath);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(filePath, file.content, 'utf8');
+          console.log(`[template] wrote ${file.path}`);
+        }
+      }
+    }
+    
+    console.log('[template] template applied successfully');
+    return true;
+  } catch (err) {
+    console.error(`[template] apply error: ${err.message}`);
+    return false;
+  }
+}
+
 // Apply personality to gateway config (system prompt)
 async function applyPersonality(personality, template = null) {
   try {
@@ -1464,6 +1529,11 @@ const server = app.listen(PORT, async () => {
         console.log(`[wrapper] auto-config ${success ? "succeeded" : "failed"}`);
         console.log(`[wrapper] configured: ${isConfigured()}`);
         if (isConfigured()) {
+          // Apply template from env var before starting gateway
+          if (ONECLAW_TEMPLATE_ID) {
+            await applyTemplateFromEnv();
+          }
+          
           ensureGatewayRunning().catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
@@ -1477,6 +1547,11 @@ const server = app.listen(PORT, async () => {
   console.log(`[wrapper] configured: ${isConfigured()}`);
 
   if (isConfigured()) {
+    // Apply template from env var before starting gateway
+    if (ONECLAW_TEMPLATE_ID) {
+      await applyTemplateFromEnv();
+    }
+    
     ensureGatewayRunning().catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
     });
