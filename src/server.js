@@ -324,6 +324,116 @@ function stopHeartbeat() {
   }
 }
 
+// ============== Auto-Configuration from Environment Variables ==============
+// For managed hosting: auto-configure from env vars without setup wizard
+
+const AUTO_CONFIG_TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
+const AUTO_CONFIG_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY?.trim();
+const AUTO_CONFIG_OPENAI_KEY = process.env.OPENAI_API_KEY?.trim();
+const AUTO_CONFIG_GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+const AUTO_CONFIG_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY?.trim();
+const AUTO_CONFIG_DEFAULT_MODEL = process.env.DEFAULT_MODEL?.trim();
+
+function hasAutoConfigEnvVars() {
+  // Need at least one AI API key to auto-configure
+  return !!(AUTO_CONFIG_ANTHROPIC_KEY || AUTO_CONFIG_OPENAI_KEY || AUTO_CONFIG_GOOGLE_KEY || AUTO_CONFIG_DEEPSEEK_KEY);
+}
+
+async function autoConfigureFromEnv() {
+  if (isConfigured()) {
+    console.log("[auto-config] already configured, skipping");
+    return true;
+  }
+
+  if (!hasAutoConfigEnvVars()) {
+    console.log("[auto-config] no API keys in env vars, skipping");
+    return false;
+  }
+
+  console.log("[auto-config] configuring from environment variables...");
+
+  // Create directories
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+
+  // Determine auth choice and secret based on available keys
+  let authChoice, authSecret;
+  if (AUTO_CONFIG_ANTHROPIC_KEY) {
+    authChoice = "apiKey";
+    authSecret = AUTO_CONFIG_ANTHROPIC_KEY;
+  } else if (AUTO_CONFIG_OPENAI_KEY) {
+    authChoice = "openai-api-key";
+    authSecret = AUTO_CONFIG_OPENAI_KEY;
+  } else if (AUTO_CONFIG_GOOGLE_KEY) {
+    authChoice = "gemini-api-key";
+    authSecret = AUTO_CONFIG_GOOGLE_KEY;
+  } else if (AUTO_CONFIG_DEEPSEEK_KEY) {
+    // DeepSeek uses OpenAI-compatible API
+    authChoice = "openai-api-key";
+    authSecret = AUTO_CONFIG_DEEPSEEK_KEY;
+  }
+
+  const payload = {
+    flow: "quickstart",
+    authChoice,
+    authSecret,
+    model: AUTO_CONFIG_DEFAULT_MODEL || "",
+  };
+
+  // Use the same buildOnboardArgs logic
+  const onboardArgs = buildOnboardArgs(payload);
+  console.log("[auto-config] running onboard...");
+  const onboard = await runCmd(OPENCLAW_NODE, clawArgs(onboardArgs));
+
+  console.log(`[auto-config] onboard exit=${onboard.code}`);
+  if (onboard.output) {
+    console.log(onboard.output);
+  }
+
+  if (onboard.code !== 0 || !isConfigured()) {
+    console.error("[auto-config] onboard failed");
+    return false;
+  }
+
+  // Configure gateway settings (same as setup wizard)
+  console.log("[auto-config] configuring gateway settings...");
+
+  await runCmd(OPENCLAW_NODE, clawArgs([
+    "config", "set", "gateway.controlUi.allowInsecureAuth", "true"
+  ]));
+
+  await runCmd(OPENCLAW_NODE, clawArgs([
+    "config", "set", "gateway.auth.token", OPENCLAW_GATEWAY_TOKEN
+  ]));
+
+  await runCmd(OPENCLAW_NODE, clawArgs([
+    "config", "set", "--json", "gateway.trustedProxies", '["127.0.0.1"]'
+  ]));
+
+  // Set model if specified
+  if (AUTO_CONFIG_DEFAULT_MODEL) {
+    console.log(`[auto-config] setting model to ${AUTO_CONFIG_DEFAULT_MODEL}`);
+    await runCmd(OPENCLAW_NODE, clawArgs(["models", "set", AUTO_CONFIG_DEFAULT_MODEL]));
+  }
+
+  // Add Telegram channel if token provided
+  if (AUTO_CONFIG_TELEGRAM_TOKEN) {
+    console.log("[auto-config] adding Telegram channel...");
+    const telegramResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "channels", "add", "telegram",
+      "--token", AUTO_CONFIG_TELEGRAM_TOKEN,
+      "--name", "telegram"
+    ]));
+    console.log(`[auto-config] telegram channel exit=${telegramResult.code}`);
+    if (telegramResult.output) {
+      console.log(telegramResult.output);
+    }
+  }
+
+  console.log("[auto-config] configuration complete!");
+  return true;
+}
+
 const setupRateLimiter = {
   attempts: new Map(),
   windowMs: 60_000,
@@ -1037,17 +1147,28 @@ app.use(async (req, res) => {
   return proxy.web(req, res, { target: GATEWAY_TARGET });
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`[wrapper] listening on port ${PORT}`);
   console.log(`[wrapper] setup wizard: http://localhost:${PORT}/setup`);
   console.log(`[wrapper] web TUI: ${ENABLE_WEB_TUI ? "enabled" : "disabled"}`);
-  console.log(`[wrapper] configured: ${isConfigured()}`);
   console.log(`[wrapper] OneClaw heartbeat: ${ONECLAW_INSTANCE_ID ? "enabled" : "disabled"}`);
 
   // Start heartbeat reporting to OneClaw
   if (ONECLAW_INSTANCE_ID) {
     startHeartbeat();
   }
+
+  // Auto-configure from environment variables if not already configured
+  if (!isConfigured() && hasAutoConfigEnvVars()) {
+    console.log("[wrapper] attempting auto-configuration from env vars...");
+    try {
+      await autoConfigureFromEnv();
+    } catch (err) {
+      console.error(`[wrapper] auto-config failed: ${err.message}`);
+    }
+  }
+
+  console.log(`[wrapper] configured: ${isConfigured()}`);
 
   if (isConfigured()) {
     ensureGatewayRunning().catch((err) => {
