@@ -18,13 +18,15 @@ COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 # Cache buster - change this to force rebuild
-ARG CACHEBUST=v20260204a
+ARG CACHEBUST=v20260204b
 
 COPY src ./src
+COPY start.sh ./start.sh
 
 RUN useradd -m -s /bin/bash openclaw \
   && chown -R openclaw:openclaw /app \
-  && mkdir -p /data && chown openclaw:openclaw /data
+  && mkdir -p /data && chown openclaw:openclaw /data \
+  && chmod +x /app/start.sh
 
 ENV PORT=8080
 ENV OPENCLAW_ENTRY=/usr/local/lib/node_modules/openclaw/dist/entry.js
@@ -34,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD curl -f http://localhost:8080/setup/healthz || exit 1
 
 USER openclaw
-CMD ["node", "src/server.js"]
+CMD ["/bin/bash", "/app/start.sh"]
