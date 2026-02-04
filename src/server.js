@@ -440,7 +440,7 @@ async function autoConfigureFromEnv() {
   }
 
   // Run doctor --fix to enable channels
-  console.log("[auto-config] running doctor --fix to enable channels...");
+  console.log("[auto-config] BUILD_ID=v20260204a - running doctor --fix...");
   const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
   console.log(`[auto-config] doctor --fix exit=${doctorResult.code}`);
   if (doctorResult.output) {

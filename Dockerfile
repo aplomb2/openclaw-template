@@ -18,7 +18,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 # Cache buster - change this to force rebuild
-ARG CACHEBUST=1770188500
+ARG CACHEBUST=v20260204a
 
 COPY src ./src
 
