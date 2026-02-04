@@ -369,7 +369,7 @@ function trackMessage(tokens = 0, model = null) {
 // Fetch personality settings from OneClaw dashboard
 async function fetchPersonality() {
   if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
-    return null;
+    return { personality: null, template: null };
   }
 
   try {
@@ -385,25 +385,40 @@ async function fetchPersonality() {
       const data = await response.json();
       cachedPersonality = data.personality;
       console.log(`[personality] fetched: ${cachedPersonality?.botName || 'default'}`);
-      return cachedPersonality;
+      if (data.template) {
+        console.log(`[template] fetched: ${data.template.name} (${data.template.memoryFiles?.length || 0} files)`);
+      }
+      return { personality: data.personality, template: data.template };
     }
   } catch (err) {
     console.error(`[personality] fetch error: ${err.message}`);
   }
-  return null;
+  return { personality: null, template: null };
 }
 
 // Apply personality to gateway config (system prompt)
-async function applyPersonality(personality) {
-  if (!personality?.systemPrompt) {
-    return;
-  }
-
+async function applyPersonality(personality, template = null) {
   try {
     // Write system prompt to SOUL.md in workspace
-    const soulPath = path.join(WORKSPACE_DIR, 'SOUL.md');
-    fs.writeFileSync(soulPath, personality.systemPrompt, 'utf8');
-    console.log(`[personality] applied system prompt to ${soulPath}`);
+    if (personality?.systemPrompt) {
+      const soulPath = path.join(WORKSPACE_DIR, 'SOUL.md');
+      fs.writeFileSync(soulPath, personality.systemPrompt, 'utf8');
+      console.log(`[personality] applied system prompt to ${soulPath}`);
+    }
+    
+    // Apply template memory files if available
+    if (template?.memoryFiles && Array.isArray(template.memoryFiles)) {
+      for (const file of template.memoryFiles) {
+        if (file.path && file.content) {
+          const filePath = path.join(WORKSPACE_DIR, file.path);
+          // Create directory if needed
+          const dir = path.dirname(filePath);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(filePath, file.content, 'utf8');
+          console.log(`[template] applied ${file.path}`);
+        }
+      }
+    }
   } catch (err) {
     console.error(`[personality] apply error: ${err.message}`);
   }
@@ -512,10 +527,10 @@ function startHeartbeat() {
     sendHeartbeat();
     sendEvent('instance_started', { version: cachedOpenclawVersion });
     
-    // Fetch and apply personality on startup
-    const personality = await fetchPersonality();
-    if (personality) {
-      await applyPersonality(personality);
+    // Fetch and apply personality/template on startup
+    const { personality, template } = await fetchPersonality();
+    if (personality || template) {
+      await applyPersonality(personality, template);
     }
   }, 30_000);
 
@@ -768,9 +783,9 @@ app.post("/api/personality/sync", async (req, res) => {
   }
 
   try {
-    const personality = await fetchPersonality();
-    if (personality) {
-      await applyPersonality(personality);
+    const { personality, template } = await fetchPersonality();
+    if (personality || template) {
+      await applyPersonality(personality, template);
       return res.json({ ok: true, message: 'Personality synced' });
     }
     return res.json({ ok: true, message: 'No personality to sync' });
