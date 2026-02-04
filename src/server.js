@@ -84,14 +84,26 @@ const TUI_MAX_SESSION_MS = Number.parseInt(
   10,
 );
 
-// ============== OneClaw Heartbeat Configuration ==============
-const ONECLAW_API_URL = process.env.ONECLAW_API_URL?.trim();
+// ============== OneClaw Integration Configuration ==============
+const ONECLAW_API_URL = process.env.ONECLAW_API_URL?.trim() || 'https://www.oneclaw.net/api';
 const ONECLAW_INSTANCE_ID = process.env.ONECLAW_INSTANCE_ID?.trim();
 const ONECLAW_INSTANCE_SECRET = process.env.ONECLAW_INSTANCE_SECRET?.trim();
 const HEARTBEAT_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const REMINDERS_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute
 
 let lastHeartbeat = null;
 let heartbeatInterval = null;
+let remindersInterval = null;
+
+// Usage stats tracking
+let usageStats = {
+  messagesThisSession: 0,
+  tokensThisSession: 0,
+  lastModel: null,
+};
+
+// Cached personality (fetched from OneClaw dashboard)
+let cachedPersonality = null;
 
 function clawArgs(args) {
   return [OPENCLAW_ENTRY, ...args];
@@ -238,7 +250,7 @@ async function restartGateway() {
   return ensureGatewayRunning();
 }
 
-// ============== OneClaw Heartbeat Functions ==============
+// ============== OneClaw Integration Functions ==============
 
 async function sendHeartbeat() {
   if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
@@ -268,6 +280,11 @@ async function sendHeartbeat() {
     if (response.ok) {
       lastHeartbeat = new Date();
       console.log(`[heartbeat] sent successfully: ${status}`);
+      
+      // Also report usage stats if we have any
+      if (usageStats.messagesThisSession > 0) {
+        await reportStats();
+      }
     } else {
       console.warn(`[heartbeat] failed: ${response.status} ${response.statusText}`);
     }
@@ -301,26 +318,225 @@ async function sendEvent(event, data = {}) {
   }
 }
 
+// Report usage statistics to OneClaw backend
+async function reportStats() {
+  if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
+    return;
+  }
+
+  if (usageStats.messagesThisSession === 0) {
+    return; // Nothing to report
+  }
+
+  try {
+    const response = await fetch(`${ONECLAW_API_URL}/agent/stats`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ONECLAW_INSTANCE_SECRET}`,
+      },
+      body: JSON.stringify({
+        instanceId: ONECLAW_INSTANCE_ID,
+        secret: ONECLAW_INSTANCE_SECRET,
+        messages: usageStats.messagesThisSession,
+        tokens: usageStats.tokensThisSession,
+        model: usageStats.lastModel,
+      }),
+    });
+
+    if (response.ok) {
+      console.log(`[stats] reported: ${usageStats.messagesThisSession} messages, ${usageStats.tokensThisSession} tokens`);
+      // Reset session counters after successful report
+      usageStats.messagesThisSession = 0;
+      usageStats.tokensThisSession = 0;
+    } else {
+      console.warn(`[stats] report failed: ${response.status}`);
+    }
+  } catch (err) {
+    console.error(`[stats] error: ${err.message}`);
+  }
+}
+
+// Track a message (called when we detect message activity)
+function trackMessage(tokens = 0, model = null) {
+  usageStats.messagesThisSession++;
+  usageStats.tokensThisSession += tokens;
+  if (model) {
+    usageStats.lastModel = model;
+  }
+}
+
+// Fetch personality settings from OneClaw dashboard
+async function fetchPersonality() {
+  if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
+    return null;
+  }
+
+  try {
+    // We need to get userId from instance - for now use instanceId as lookup
+    const response = await fetch(`${ONECLAW_API_URL}/agent/personality?instanceId=${ONECLAW_INSTANCE_ID}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${ONECLAW_INSTANCE_SECRET}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      cachedPersonality = data.personality;
+      console.log(`[personality] fetched: ${cachedPersonality?.botName || 'default'}`);
+      return cachedPersonality;
+    }
+  } catch (err) {
+    console.error(`[personality] fetch error: ${err.message}`);
+  }
+  return null;
+}
+
+// Apply personality to gateway config (system prompt)
+async function applyPersonality(personality) {
+  if (!personality?.systemPrompt) {
+    return;
+  }
+
+  try {
+    // Write system prompt to SOUL.md in workspace
+    const soulPath = path.join(WORKSPACE_DIR, 'SOUL.md');
+    fs.writeFileSync(soulPath, personality.systemPrompt, 'utf8');
+    console.log(`[personality] applied system prompt to ${soulPath}`);
+  } catch (err) {
+    console.error(`[personality] apply error: ${err.message}`);
+  }
+}
+
+// Check and execute reminders from OneClaw dashboard
+async function checkReminders() {
+  if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${ONECLAW_API_URL}/agent/reminders/due?instanceId=${ONECLAW_INSTANCE_ID}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${ONECLAW_INSTANCE_SECRET}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const dueReminders = data.reminders || [];
+      
+      for (const reminder of dueReminders) {
+        console.log(`[reminders] executing: ${reminder.title}`);
+        await executeReminder(reminder);
+      }
+    }
+  } catch (err) {
+    // Silently fail - reminders are optional
+    if (err.message !== 'fetch failed') {
+      console.error(`[reminders] check error: ${err.message}`);
+    }
+  }
+}
+
+// Execute a single reminder by sending message to gateway
+async function executeReminder(reminder) {
+  if (!isGatewayReady()) {
+    console.warn(`[reminders] gateway not ready, skipping: ${reminder.title}`);
+    return;
+  }
+
+  try {
+    // Use gateway RPC to trigger a cron-like event
+    const response = await fetch(`${GATEWAY_TARGET}/rpc`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
+      },
+      body: JSON.stringify({
+        method: 'cron.wake',
+        params: {
+          text: reminder.message,
+          source: 'oneclaw-reminder',
+          reminderId: reminder.id,
+        },
+      }),
+    });
+
+    if (response.ok) {
+      console.log(`[reminders] executed: ${reminder.title}`);
+      // Mark reminder as executed
+      await markReminderExecuted(reminder.id);
+    }
+  } catch (err) {
+    console.error(`[reminders] execute error: ${err.message}`);
+  }
+}
+
+// Mark a reminder as executed
+async function markReminderExecuted(reminderId) {
+  if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
+    return;
+  }
+
+  try {
+    await fetch(`${ONECLAW_API_URL}/agent/reminders/executed`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ONECLAW_INSTANCE_SECRET}`,
+      },
+      body: JSON.stringify({
+        instanceId: ONECLAW_INSTANCE_ID,
+        reminderId,
+        executedAt: new Date().toISOString(),
+      }),
+    });
+  } catch (err) {
+    console.error(`[reminders] mark executed error: ${err.message}`);
+  }
+}
+
 function startHeartbeat() {
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
   }
+  if (remindersInterval) {
+    clearInterval(remindersInterval);
+  }
 
   // Send initial heartbeat after 30 seconds
-  setTimeout(() => {
+  setTimeout(async () => {
     sendHeartbeat();
     sendEvent('instance_started', { version: cachedOpenclawVersion });
+    
+    // Fetch and apply personality on startup
+    const personality = await fetchPersonality();
+    if (personality) {
+      await applyPersonality(personality);
+    }
   }, 30_000);
 
-  // Then every 10 minutes
+  // Heartbeat every 10 minutes
   heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+  
+  // Check reminders every minute
+  remindersInterval = setInterval(checkReminders, REMINDERS_CHECK_INTERVAL_MS);
+  
   console.log(`[heartbeat] started (interval: ${HEARTBEAT_INTERVAL_MS / 1000}s)`);
+  console.log(`[reminders] check started (interval: ${REMINDERS_CHECK_INTERVAL_MS / 1000}s)`);
 }
 
 function stopHeartbeat() {
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
+  }
+  if (remindersInterval) {
+    clearInterval(remindersInterval);
+    remindersInterval = null;
   }
 }
 
@@ -515,6 +731,53 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
+
+// OneClaw test message endpoint
+app.post("/api/test", async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '');
+  
+  if (!ONECLAW_INSTANCE_SECRET || token !== ONECLAW_INSTANCE_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { type, message } = req.body || {};
+  
+  if (type === 'test') {
+    // Log the test and respond
+    console.log(`[test] received test message: ${message}`);
+    trackMessage(0, null); // Track as a message for stats
+    return res.json({ 
+      ok: true, 
+      message: 'Test received',
+      instanceId: ONECLAW_INSTANCE_ID,
+      status: isGatewayReady() ? 'healthy' : 'starting',
+    });
+  }
+
+  return res.json({ ok: true });
+});
+
+// OneClaw personality sync endpoint (webhook from dashboard)
+app.post("/api/personality/sync", async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '');
+  
+  if (!ONECLAW_INSTANCE_SECRET || token !== ONECLAW_INSTANCE_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const personality = await fetchPersonality();
+    if (personality) {
+      await applyPersonality(personality);
+      return res.json({ ok: true, message: 'Personality synced' });
+    }
+    return res.json({ ok: true, message: 'No personality to sync' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 app.get("/setup/styles.css", (_req, res) => {
   res.type("text/css");
