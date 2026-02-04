@@ -84,6 +84,15 @@ const TUI_MAX_SESSION_MS = Number.parseInt(
   10,
 );
 
+// ============== OneClaw Heartbeat Configuration ==============
+const ONECLAW_API_URL = process.env.ONECLAW_API_URL?.trim();
+const ONECLAW_INSTANCE_ID = process.env.ONECLAW_INSTANCE_ID?.trim();
+const ONECLAW_INSTANCE_SECRET = process.env.ONECLAW_INSTANCE_SECRET?.trim();
+const HEARTBEAT_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+let lastHeartbeat = null;
+let heartbeatInterval = null;
+
 function clawArgs(args) {
   return [OPENCLAW_ENTRY, ...args];
 }
@@ -227,6 +236,92 @@ async function restartGateway() {
     gatewayProc = null;
   }
   return ensureGatewayRunning();
+}
+
+// ============== OneClaw Heartbeat Functions ==============
+
+async function sendHeartbeat() {
+  if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
+    return; // Heartbeat not configured
+  }
+
+  try {
+    const status = isGatewayReady() ? 'healthy' : isGatewayStarting() ? 'starting' : 'unhealthy';
+    const payload = {
+      instanceId: ONECLAW_INSTANCE_ID,
+      status,
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      configured: isConfigured(),
+      gatewayReady: isGatewayReady(),
+    };
+
+    const response = await fetch(`${ONECLAW_API_URL}/agent/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ONECLAW_INSTANCE_SECRET}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      lastHeartbeat = new Date();
+      console.log(`[heartbeat] sent successfully: ${status}`);
+    } else {
+      console.warn(`[heartbeat] failed: ${response.status} ${response.statusText}`);
+    }
+  } catch (err) {
+    console.error(`[heartbeat] error: ${err.message}`);
+  }
+}
+
+async function sendEvent(event, data = {}) {
+  if (!ONECLAW_API_URL || !ONECLAW_INSTANCE_ID || !ONECLAW_INSTANCE_SECRET) {
+    return;
+  }
+
+  try {
+    await fetch(`${ONECLAW_API_URL}/agent/event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ONECLAW_INSTANCE_SECRET}`,
+      },
+      body: JSON.stringify({
+        instanceId: ONECLAW_INSTANCE_ID,
+        event,
+        data,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+    console.log(`[event] sent: ${event}`);
+  } catch (err) {
+    console.error(`[event] error: ${err.message}`);
+  }
+}
+
+function startHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+
+  // Send initial heartbeat after 30 seconds
+  setTimeout(() => {
+    sendHeartbeat();
+    sendEvent('instance_started', { version: cachedOpenclawVersion });
+  }, 30_000);
+
+  // Then every 10 minutes
+  heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+  console.log(`[heartbeat] started (interval: ${HEARTBEAT_INTERVAL_MS / 1000}s)`);
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
 }
 
 const setupRateLimiter = {
@@ -947,6 +1042,12 @@ const server = app.listen(PORT, () => {
   console.log(`[wrapper] setup wizard: http://localhost:${PORT}/setup`);
   console.log(`[wrapper] web TUI: ${ENABLE_WEB_TUI ? "enabled" : "disabled"}`);
   console.log(`[wrapper] configured: ${isConfigured()}`);
+  console.log(`[wrapper] OneClaw heartbeat: ${ONECLAW_INSTANCE_ID ? "enabled" : "disabled"}`);
+
+  // Start heartbeat reporting to OneClaw
+  if (ONECLAW_INSTANCE_ID) {
+    startHeartbeat();
+  }
 
   if (isConfigured()) {
     ensureGatewayRunning().catch((err) => {
@@ -1001,6 +1102,10 @@ server.on("upgrade", async (req, socket, head) => {
 
 async function gracefulShutdown(signal) {
   console.log(`[wrapper] received ${signal}, shutting down`);
+
+  // Stop heartbeat and send shutdown event
+  stopHeartbeat();
+  await sendEvent('instance_stopping', { signal });
 
   if (setupRateLimiter.cleanupInterval) {
     clearInterval(setupRateLimiter.cleanupInterval);
