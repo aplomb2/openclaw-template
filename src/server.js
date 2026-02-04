@@ -425,6 +425,7 @@ async function autoConfigureFromEnv() {
     const telegramConfig = {
       enabled: true,
       dmPolicy: "open",  // Allow immediate access without pairing
+      allowFrom: ["*"],  // Required when dmPolicy is "open"
       botToken: AUTO_CONFIG_TELEGRAM_TOKEN,
       groupPolicy: "allowlist",
       streamMode: "partial",
