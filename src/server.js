@@ -1161,13 +1161,24 @@ const server = app.listen(PORT, async () => {
   }
 
   // Auto-configure from environment variables if not already configured
+  // Run in background to not block health check
   if (!isConfigured() && hasAutoConfigEnvVars()) {
-    console.log("[wrapper] attempting auto-configuration from env vars...");
-    try {
-      await autoConfigureFromEnv();
-    } catch (err) {
-      console.error(`[wrapper] auto-config failed: ${err.message}`);
-    }
+    console.log("[wrapper] scheduling auto-configuration from env vars...");
+    setTimeout(async () => {
+      try {
+        console.log("[wrapper] starting auto-configuration...");
+        const success = await autoConfigureFromEnv();
+        console.log(`[wrapper] auto-config ${success ? "succeeded" : "failed"}`);
+        console.log(`[wrapper] configured: ${isConfigured()}`);
+        if (isConfigured()) {
+          ensureGatewayRunning().catch((err) => {
+            console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
+          });
+        }
+      } catch (err) {
+        console.error(`[wrapper] auto-config failed: ${err.message}`);
+      }
+    }, 1000); // Start after 1 second to let health check pass first
   }
 
   console.log(`[wrapper] configured: ${isConfigured()}`);
