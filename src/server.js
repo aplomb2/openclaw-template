@@ -419,12 +419,18 @@ async function autoConfigureFromEnv() {
   }
 
   // Add Telegram channel if token provided
+  // Use "open" dmPolicy for managed hosting (no pairing required)
   if (AUTO_CONFIG_TELEGRAM_TOKEN) {
-    console.log("[auto-config] adding Telegram channel...");
+    console.log("[auto-config] configuring Telegram channel (open access)...");
+    const telegramConfig = {
+      enabled: true,
+      dmPolicy: "open",  // Allow immediate access without pairing
+      botToken: AUTO_CONFIG_TELEGRAM_TOKEN,
+      groupPolicy: "allowlist",
+      streamMode: "partial",
+    };
     const telegramResult = await runCmd(OPENCLAW_NODE, clawArgs([
-      "channels", "add", "telegram",
-      "--token", AUTO_CONFIG_TELEGRAM_TOKEN,
-      "--name", "telegram"
+      "config", "set", "--json", "channels.telegram", JSON.stringify(telegramConfig)
     ]));
     console.log(`[auto-config] telegram channel exit=${telegramResult.code}`);
     if (telegramResult.output) {
