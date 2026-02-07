@@ -20,7 +20,8 @@ const WORKSPACE_DIR =
 const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
 
 function resolveGatewayToken() {
-  const envTok = process.env.OPENCLAW_GATEWAY_TOKEN?.trim();
+  // Check both env var names for backwards compatibility
+  const envTok = (process.env.OPENCLAW_GATEWAY_TOKEN || process.env.GATEWAY_TOKEN)?.trim();
   if (envTok) return envTok;
 
   const tokenPath = path.join(STATE_DIR, "gateway.token");
