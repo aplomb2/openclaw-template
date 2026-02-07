@@ -634,6 +634,14 @@ async function ensureWebSocketConfig() {
   // This fixes existing instances that were deployed before this config was added
   // Can also be set via GATEWAY_CONTROL_UI_ALLOWED_ORIGINS env var
   try {
+    // First, ensure allowInsecureAuth is enabled (required for web chat)
+    // This disables device identity requirement for Control UI connections
+    console.log("[startup-fix] ensuring allowInsecureAuth=true...");
+    const authResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "gateway.controlUi.allowInsecureAuth", "true"
+    ]));
+    console.log(`[startup-fix] allowInsecureAuth configured (exit=${authResult.code})`);
+    
     let origins = DEFAULT_ALLOWED_ORIGINS;
     if (ALLOWED_ORIGINS_ENV) {
       // Parse comma-separated origins from env var and convert to JSON array
@@ -649,7 +657,7 @@ async function ensureWebSocketConfig() {
     console.log(`[startup-fix] WebSocket allowedOrigins configured (exit=${result.code})`);
     if (result.output) console.log(result.output);
   } catch (err) {
-    console.warn(`[startup-fix] failed to set allowedOrigins: ${err.message}`);
+    console.warn(`[startup-fix] failed to set config: ${err.message}`);
   }
 }
 
