@@ -620,6 +620,26 @@ function stopHeartbeat() {
   }
 }
 
+// ============== Startup Config Fixes ==============
+// Ensure critical config is always present (runs on every start for existing instances)
+
+async function ensureWebSocketConfig() {
+  if (!isConfigured()) return;
+  
+  // Always ensure OneClaw website can connect via WebSocket
+  // This fixes existing instances that were deployed before this config was added
+  try {
+    console.log("[startup-fix] ensuring WebSocket allowedOrigins config...");
+    await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "gateway.controlUi.allowedOrigins", 
+      '["https://oneclaw.net","https://www.oneclaw.net"]'
+    ]));
+    console.log("[startup-fix] WebSocket allowedOrigins configured");
+  } catch (err) {
+    console.warn(`[startup-fix] failed to set allowedOrigins: ${err.message}`);
+  }
+}
+
 // ============== Auto-Configuration from Environment Variables ==============
 // For managed hosting: auto-configure from env vars without setup wizard
 
@@ -1588,6 +1608,9 @@ const server = app.listen(PORT, async () => {
     if (ONECLAW_TEMPLATE_ID) {
       await applyTemplateFromEnv();
     }
+    
+    // Ensure WebSocket config is correct (fixes existing instances)
+    await ensureWebSocketConfig();
     
     ensureGatewayRunning().catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
