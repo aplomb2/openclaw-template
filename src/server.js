@@ -623,18 +623,31 @@ function stopHeartbeat() {
 // ============== Startup Config Fixes ==============
 // Ensure critical config is always present (runs on every start for existing instances)
 
+// Can be overridden via environment variable
+const ALLOWED_ORIGINS_ENV = process.env.GATEWAY_CONTROL_UI_ALLOWED_ORIGINS?.trim();
+const DEFAULT_ALLOWED_ORIGINS = '["https://oneclaw.net","https://www.oneclaw.net"]';
+
 async function ensureWebSocketConfig() {
   if (!isConfigured()) return;
   
   // Always ensure OneClaw website can connect via WebSocket
   // This fixes existing instances that were deployed before this config was added
+  // Can also be set via GATEWAY_CONTROL_UI_ALLOWED_ORIGINS env var
   try {
+    let origins = DEFAULT_ALLOWED_ORIGINS;
+    if (ALLOWED_ORIGINS_ENV) {
+      // Parse comma-separated origins from env var and convert to JSON array
+      const originsList = ALLOWED_ORIGINS_ENV.split(',').map(o => o.trim()).filter(Boolean);
+      origins = JSON.stringify(originsList);
+      console.log(`[startup-fix] using allowedOrigins from env: ${origins}`);
+    }
+    
     console.log("[startup-fix] ensuring WebSocket allowedOrigins config...");
-    await runCmd(OPENCLAW_NODE, clawArgs([
-      "config", "set", "--json", "gateway.controlUi.allowedOrigins", 
-      '["https://oneclaw.net","https://www.oneclaw.net"]'
+    const result = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "gateway.controlUi.allowedOrigins", origins
     ]));
-    console.log("[startup-fix] WebSocket allowedOrigins configured");
+    console.log(`[startup-fix] WebSocket allowedOrigins configured (exit=${result.code})`);
+    if (result.output) console.log(result.output);
   } catch (err) {
     console.warn(`[startup-fix] failed to set allowedOrigins: ${err.message}`);
   }
