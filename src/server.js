@@ -1297,6 +1297,23 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
       );
       extra += `[config] gateway.trustedProxies exit=${proxiesResult.code}\n`;
 
+      // Set allowed origins for Control UI WebSocket connections
+      const setupAllowedOrigins = process.env.GATEWAY_CONTROL_UI_ALLOWED_ORIGINS?.trim();
+      if (setupAllowedOrigins) {
+        const originsArray = setupAllowedOrigins.split(',').map(o => o.trim()).filter(Boolean);
+        const originsResult = await runCmd(
+          OPENCLAW_NODE,
+          clawArgs([
+            "config",
+            "set",
+            "--json",
+            "gateway.controlUi.allowedOrigins",
+            JSON.stringify(originsArray),
+          ]),
+        );
+        extra += `[config] gateway.controlUi.allowedOrigins exit=${originsResult.code}\n`;
+      }
+
       if (payload.model?.trim()) {
         extra += `[setup] Setting model to ${payload.model.trim()}...\n`;
         const modelResult = await runCmd(
