@@ -893,6 +893,49 @@ app.use(express.json({ limit: "1mb" }));
 
 app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
 
+// Fix webchat config endpoint (uses gateway token for auth)
+app.post("/api/fix-webchat", async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '');
+  
+  if (!OPENCLAW_GATEWAY_TOKEN || token !== OPENCLAW_GATEWAY_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!isConfigured()) {
+    return res.status(400).json({ error: 'Instance not configured' });
+  }
+
+  try {
+    console.log("[fix-webchat] applying webchat config fixes...");
+    
+    // Set allowInsecureAuth
+    const authResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "gateway.controlUi.allowInsecureAuth", "true"
+    ]));
+    
+    // Set allowedOrigins
+    const originsResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "gateway.controlUi.allowedOrigins", 
+      '["https://oneclaw.net","https://www.oneclaw.net"]'
+    ]));
+
+    console.log(`[fix-webchat] done: allowInsecureAuth=${authResult.code} allowedOrigins=${originsResult.code}`);
+    
+    return res.json({ 
+      ok: true, 
+      message: 'Webchat config applied',
+      results: {
+        allowInsecureAuth: authResult.code === 0,
+        allowedOrigins: originsResult.code === 0
+      }
+    });
+  } catch (err) {
+    console.error("[fix-webchat] error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // OneClaw test message endpoint
 app.post("/api/test", async (req, res) => {
   const authHeader = req.headers.authorization || '';
