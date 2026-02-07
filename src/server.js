@@ -736,11 +736,43 @@ async function autoConfigureFromEnv() {
   }
 
   // Run doctor --fix to enable channels
-  console.log("[auto-config] BUILD_ID=v20260204a - running doctor --fix...");
+  console.log("[auto-config] BUILD_ID=v20260206a - running doctor --fix...");
   const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
   console.log(`[auto-config] doctor --fix exit=${doctorResult.code}`);
   if (doctorResult.output) {
     console.log(doctorResult.output);
+  }
+
+  // Set ALL available API keys in config (not just the primary one used for onboard)
+  // This allows users to switch between providers or use fallback models
+  console.log("[auto-config] setting additional API keys in config...");
+  const envKeys = {};
+  if (AUTO_CONFIG_ANTHROPIC_KEY) {
+    envKeys.ANTHROPIC_API_KEY = AUTO_CONFIG_ANTHROPIC_KEY;
+    console.log("[auto-config] + ANTHROPIC_API_KEY");
+  }
+  if (AUTO_CONFIG_OPENAI_KEY) {
+    envKeys.OPENAI_API_KEY = AUTO_CONFIG_OPENAI_KEY;
+    console.log("[auto-config] + OPENAI_API_KEY");
+  }
+  if (AUTO_CONFIG_GOOGLE_KEY) {
+    envKeys.GOOGLE_GENERATIVE_AI_API_KEY = AUTO_CONFIG_GOOGLE_KEY;
+    console.log("[auto-config] + GOOGLE_GENERATIVE_AI_API_KEY");
+  }
+  if (AUTO_CONFIG_DEEPSEEK_KEY) {
+    envKeys.DEEPSEEK_API_KEY = AUTO_CONFIG_DEEPSEEK_KEY;
+    console.log("[auto-config] + DEEPSEEK_API_KEY");
+  }
+  
+  // Set all keys at once in the env config
+  if (Object.keys(envKeys).length > 0) {
+    const envResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "env", JSON.stringify(envKeys)
+    ]));
+    console.log(`[auto-config] env keys set exit=${envResult.code}`);
+    if (envResult.output) {
+      console.log(envResult.output);
+    }
   }
 
   console.log("[auto-config] configuration complete!");
