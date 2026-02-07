@@ -1658,6 +1658,9 @@ const server = app.listen(PORT, async () => {
             await applyTemplateFromEnv();
           }
           
+          // Ensure WebSocket config is correct (critical for web chat)
+          await ensureWebSocketConfig();
+          
           ensureGatewayRunning().catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
