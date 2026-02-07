@@ -708,6 +708,11 @@ async function autoConfigureFromEnv() {
     "config", "set", "--json", "gateway.trustedProxies", '["127.0.0.1"]'
   ]));
 
+  // Allow OneClaw website to connect via WebSocket (Control UI)
+  await runCmd(OPENCLAW_NODE, clawArgs([
+    "config", "set", "--json", "gateway.controlUi.allowedOrigins", '["https://oneclaw.net","https://www.oneclaw.net"]'
+  ]));
+
   // Set model if specified
   if (AUTO_CONFIG_DEFAULT_MODEL) {
     console.log(`[auto-config] setting model to ${AUTO_CONFIG_DEFAULT_MODEL}`);
