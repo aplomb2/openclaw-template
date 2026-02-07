@@ -729,9 +729,12 @@ async function autoConfigureFromEnv() {
   ]));
 
   // Allow OneClaw website to connect via WebSocket (Control UI)
-  await runCmd(OPENCLAW_NODE, clawArgs([
+  console.log("[auto-config] setting gateway.controlUi.allowedOrigins for OneClaw website...");
+  const originsResult = await runCmd(OPENCLAW_NODE, clawArgs([
     "config", "set", "--json", "gateway.controlUi.allowedOrigins", '["https://oneclaw.net","https://www.oneclaw.net"]'
   ]));
+  console.log(`[auto-config] allowedOrigins set exit=${originsResult.code}`);
+  if (originsResult.output) console.log(originsResult.output);
 
   // Set model if specified
   if (AUTO_CONFIG_DEFAULT_MODEL) {
@@ -761,7 +764,7 @@ async function autoConfigureFromEnv() {
   }
 
   // Run doctor --fix to enable channels
-  console.log("[auto-config] BUILD_ID=v20260206a - running doctor --fix...");
+  console.log("[auto-config] BUILD_ID=v20260207a - running doctor --fix...");
   const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
   console.log(`[auto-config] doctor --fix exit=${doctorResult.code}`);
   if (doctorResult.output) {
