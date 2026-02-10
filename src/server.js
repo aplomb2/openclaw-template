@@ -1684,7 +1684,14 @@ const server = app.listen(PORT, async () => {
           // Ensure WebSocket config is correct (critical for web chat)
           await ensureWebSocketConfig();
           
-          ensureGatewayRunning().catch((err) => {
+          ensureGatewayRunning().then(async () => {
+            // Run doctor --fix AFTER gateway is ready to enable channels (e.g., Telegram)
+            // doctor --fix needs a running gateway to activate channel polling
+            console.log("[wrapper] gateway running, running doctor --fix to enable channels...");
+            const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
+            console.log(`[wrapper] post-gateway doctor --fix exit=${doctorResult.code}`);
+            if (doctorResult.output) console.log(doctorResult.output);
+          }).catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
         }
@@ -1705,7 +1712,13 @@ const server = app.listen(PORT, async () => {
     // Ensure WebSocket config is correct (fixes existing instances)
     await ensureWebSocketConfig();
     
-    ensureGatewayRunning().catch((err) => {
+    ensureGatewayRunning().then(async () => {
+      // Run doctor --fix after gateway is ready to enable channels
+      console.log("[wrapper] gateway running at boot, running doctor --fix...");
+      const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
+      console.log(`[wrapper] boot doctor --fix exit=${doctorResult.code}`);
+      if (doctorResult.output) console.log(doctorResult.output);
+    }).catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
     });
   }
