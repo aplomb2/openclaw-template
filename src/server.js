@@ -693,9 +693,10 @@ async function autoConfigureFromEnv() {
 
   console.log("[auto-config] configuring from environment variables...");
 
-  // Create directories
+  // Create directories (including credentials dir to avoid CRITICAL doctor warning)
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+  fs.mkdirSync(path.join(STATE_DIR, "credentials"), { recursive: true });
 
   // Determine auth choice and secret based on available keys
   let authChoice, authSecret;
@@ -790,7 +791,7 @@ async function autoConfigureFromEnv() {
   }
 
   // Run doctor --fix to enable channels
-  console.log("[auto-config] BUILD_ID=v20260207a - running doctor --fix...");
+  console.log("[auto-config] BUILD_ID=v20260210a - running doctor --fix...");
   const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
   console.log(`[auto-config] doctor --fix exit=${doctorResult.code}`);
   if (doctorResult.output) {
