@@ -770,21 +770,31 @@ async function autoConfigureFromEnv() {
   }
 
   // Configure Telegram channel for managed hosting (open access, no pairing)
-  // NOTE: onboard already detects TELEGRAM_BOT_TOKEN and creates base Telegram config.
-  // We only patch specific fields needed for managed hosting instead of replacing the
-  // entire channel config, because overwriting drops internal fields onboard sets.
+  // NOTE: onboard detects TELEGRAM_BOT_TOKEN and creates base Telegram config.
+  // We directly modify the JSON config file to patch fields, because:
+  // - `config set --json channels.telegram {...}` replaces the whole object, dropping internal fields
+  // - `config set channels.telegram.enabled true` may not support dotted nested paths
   if (AUTO_CONFIG_TELEGRAM_TOKEN) {
-    console.log("[auto-config] patching Telegram channel for open access...");
-    await runCmd(OPENCLAW_NODE, clawArgs([
-      "config", "set", "--json", "channels.telegram.enabled", "true"
-    ]));
-    await runCmd(OPENCLAW_NODE, clawArgs([
-      "config", "set", "channels.telegram.dmPolicy", "open"
-    ]));
-    await runCmd(OPENCLAW_NODE, clawArgs([
-      "config", "set", "--json", "channels.telegram.allowFrom", '["*"]'
-    ]));
-    console.log("[auto-config] telegram channel patched (enabled + open access)");
+    console.log("[auto-config] patching Telegram channel config directly...");
+    try {
+      const cfgPath = configPath();
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      if (cfg.channels && cfg.channels.telegram) {
+        cfg.channels.telegram.enabled = true;
+        cfg.channels.telegram.dmPolicy = "open";
+        cfg.channels.telegram.allowFrom = ["*"];
+        cfg.channels.telegram.streamMode = "partial";
+        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf8");
+        console.log("[auto-config] telegram channel patched: enabled=true, dmPolicy=open");
+        console.log("[auto-config] telegram config keys:", Object.keys(cfg.channels.telegram).join(", "));
+      } else {
+        console.warn("[auto-config] channels.telegram not found in config, onboard may not have created it");
+        console.log("[auto-config] config keys:", Object.keys(cfg).join(", "));
+        if (cfg.channels) console.log("[auto-config] channel keys:", Object.keys(cfg.channels).join(", "));
+      }
+    } catch (err) {
+      console.error(`[auto-config] failed to patch telegram config: ${err.message}`);
+    }
   }
 
   // NOTE: doctor --fix is NOT run here because it needs the gateway running
