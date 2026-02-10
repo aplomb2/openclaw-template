@@ -769,37 +769,30 @@ async function autoConfigureFromEnv() {
     await runCmd(OPENCLAW_NODE, clawArgs(["models", "set", AUTO_CONFIG_DEFAULT_MODEL]));
   }
 
-  // Configure Telegram channel for managed hosting (open access, no pairing)
-  // NOTE: onboard detects TELEGRAM_BOT_TOKEN and creates base Telegram config.
-  // We directly modify the JSON config file to patch fields, because:
-  // - `config set --json channels.telegram {...}` replaces the whole object, dropping internal fields
-  // - `config set channels.telegram.enabled true` may not support dotted nested paths
+  // Add Telegram channel if token provided
+  // Use "open" dmPolicy for managed hosting (no pairing required)
   if (AUTO_CONFIG_TELEGRAM_TOKEN) {
-    console.log("[auto-config] patching Telegram channel config directly...");
-    try {
-      const cfgPath = configPath();
-      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-      if (cfg.channels && cfg.channels.telegram) {
-        cfg.channels.telegram.enabled = true;
-        cfg.channels.telegram.dmPolicy = "open";
-        cfg.channels.telegram.allowFrom = ["*"];
-        cfg.channels.telegram.streamMode = "partial";
-        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf8");
-        console.log("[auto-config] telegram channel patched: enabled=true, dmPolicy=open");
-        console.log("[auto-config] telegram config keys:", Object.keys(cfg.channels.telegram).join(", "));
-      } else {
-        console.warn("[auto-config] channels.telegram not found in config, onboard may not have created it");
-        console.log("[auto-config] config keys:", Object.keys(cfg).join(", "));
-        if (cfg.channels) console.log("[auto-config] channel keys:", Object.keys(cfg.channels).join(", "));
-      }
-    } catch (err) {
-      console.error(`[auto-config] failed to patch telegram config: ${err.message}`);
+    console.log("[auto-config] configuring Telegram channel (open access)...");
+    const telegramConfig = {
+      enabled: true,
+      dmPolicy: "open",  // Allow immediate access without pairing
+      allowFrom: ["*"],  // Required when dmPolicy is "open"
+      botToken: AUTO_CONFIG_TELEGRAM_TOKEN,
+      groupPolicy: "allowlist",
+      streamMode: "partial",
+    };
+    const telegramResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "channels.telegram", JSON.stringify(telegramConfig)
+    ]));
+    console.log(`[auto-config] telegram channel exit=${telegramResult.code}`);
+    if (telegramResult.output) {
+      console.log(telegramResult.output);
     }
   }
 
-  // NOTE: doctor --fix is NOT run here because it needs the gateway running
-  // to enable channels like Telegram. It runs after ensureGatewayRunning().
-  console.log("[auto-config] BUILD_ID=v20260210b - skipping pre-gateway doctor --fix");
+  // NOTE: doctor --fix here cannot enable Telegram (gateway not running yet).
+  // The critical doctor --fix runs AFTER ensureGatewayRunning() to enable channels.
+  console.log("[auto-config] BUILD_ID=v20260210c - skipping pre-gateway doctor --fix");
 
   // Set ALL available API keys in config (not just the primary one used for onboard)
   // This allows users to switch between providers or use fallback models
@@ -1689,16 +1682,12 @@ const server = app.listen(PORT, async () => {
           
           ensureGatewayRunning().then(async () => {
             // Run doctor --fix AFTER gateway is ready to enable channels (e.g., Telegram)
-            // doctor --fix needs a running gateway to activate channel polling
+            // doctor --fix connects to the running gateway API and enables channels in-memory.
+            // Do NOT restart the gateway after this - that would lose the in-memory channel state.
             console.log("[wrapper] gateway running, running doctor --fix to enable channels...");
             const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
             console.log(`[wrapper] post-gateway doctor --fix exit=${doctorResult.code}`);
             if (doctorResult.output) console.log(doctorResult.output);
-            // Force a full gateway restart to pick up channel changes
-            // (SIGUSR1 self-restart may not fully reload channels)
-            console.log("[wrapper] restarting gateway to apply channel config...");
-            await restartGateway();
-            console.log("[wrapper] gateway restarted successfully");
           }).catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
