@@ -776,12 +776,15 @@ async function autoConfigureFromEnv() {
   if (AUTO_CONFIG_TELEGRAM_TOKEN) {
     console.log("[auto-config] patching Telegram channel for open access...");
     await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "channels.telegram.enabled", "true"
+    ]));
+    await runCmd(OPENCLAW_NODE, clawArgs([
       "config", "set", "channels.telegram.dmPolicy", "open"
     ]));
     await runCmd(OPENCLAW_NODE, clawArgs([
       "config", "set", "--json", "channels.telegram.allowFrom", '["*"]'
     ]));
-    console.log("[auto-config] telegram channel patched");
+    console.log("[auto-config] telegram channel patched (enabled + open access)");
   }
 
   // NOTE: doctor --fix is NOT run here because it needs the gateway running
