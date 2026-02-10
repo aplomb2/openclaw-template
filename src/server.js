@@ -790,9 +790,13 @@ async function autoConfigureFromEnv() {
     }
   }
 
-  // NOTE: doctor --fix here cannot enable Telegram (gateway not running yet).
-  // The critical doctor --fix runs AFTER ensureGatewayRunning() to enable channels.
-  console.log("[auto-config] BUILD_ID=v20260210d - skipping pre-gateway doctor --fix (runs after gateway with double-fix)");
+  // Pre-gateway doctor --fix: fixes config file format BEFORE gateway starts.
+  // This ensures the config is correct so that post-gateway doctor --fix
+  // only needs to enable channels in-memory (no config write → no SIGUSR1 restart).
+  console.log("[auto-config] BUILD_ID=v20260210e - running pre-gateway doctor --fix to fix config...");
+  const preDoctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
+  console.log(`[auto-config] pre-gateway doctor --fix exit=${preDoctorResult.code}`);
+  if (preDoctorResult.output) console.log(preDoctorResult.output);
 
   // Set ALL available API keys in config (not just the primary one used for onboard)
   // This allows users to switch between providers or use fallback models
@@ -1681,32 +1685,13 @@ const server = app.listen(PORT, async () => {
           await ensureWebSocketConfig();
           
           ensureGatewayRunning().then(async () => {
-            // First doctor --fix: enables Telegram in-memory via gateway API
+            // Post-gateway doctor --fix: enables channels (Telegram) in-memory via gateway API.
+            // Config was already fixed by pre-gateway doctor --fix, so this should NOT write
+            // to config file → no SIGUSR1 restart → channels stay enabled.
             console.log("[wrapper] gateway running, running doctor --fix to enable channels...");
             const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
             console.log(`[wrapper] post-gateway doctor --fix exit=${doctorResult.code}`);
             if (doctorResult.output) console.log(doctorResult.output);
-
-            // doctor --fix writes to config file, which triggers gateway SIGUSR1 self-restart.
-            // The restart loses in-memory channel state (Telegram).
-            // Wait for the restart to complete, then run doctor --fix again to re-enable.
-            console.log("[wrapper] waiting 15s for gateway SIGUSR1 restart after config change...");
-            await sleep(15000);
-
-            // Ensure gateway is ready after restart
-            if (!gatewayProc) {
-              console.log("[wrapper] gateway process exited during restart, restarting...");
-              await ensureGatewayRunning();
-            } else {
-              await waitForGatewayReady({ timeoutMs: 30000 });
-            }
-
-            // Second doctor --fix: re-enable channels in the restarted gateway.
-            // Config is already correct from first run, so this should NOT trigger another restart.
-            console.log("[wrapper] running second doctor --fix to re-enable channels after restart...");
-            const doctorResult2 = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
-            console.log(`[wrapper] second doctor --fix exit=${doctorResult2.code}`);
-            if (doctorResult2.output) console.log(doctorResult2.output);
           }).catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
@@ -1729,27 +1714,11 @@ const server = app.listen(PORT, async () => {
     await ensureWebSocketConfig();
     
     ensureGatewayRunning().then(async () => {
-      // First doctor --fix: enables channels in-memory
+      // Post-gateway doctor --fix: enables channels in-memory
       console.log("[wrapper] gateway running at boot, running doctor --fix...");
       const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
       console.log(`[wrapper] boot doctor --fix exit=${doctorResult.code}`);
       if (doctorResult.output) console.log(doctorResult.output);
-
-      // Wait for potential SIGUSR1 restart, then re-enable channels
-      console.log("[wrapper] waiting 15s for potential gateway restart...");
-      await sleep(15000);
-
-      if (!gatewayProc) {
-        console.log("[wrapper] gateway process exited during restart, restarting...");
-        await ensureGatewayRunning();
-      } else {
-        await waitForGatewayReady({ timeoutMs: 30000 });
-      }
-
-      console.log("[wrapper] running second doctor --fix to re-enable channels...");
-      const doctorResult2 = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
-      console.log(`[wrapper] boot second doctor --fix exit=${doctorResult2.code}`);
-      if (doctorResult2.output) console.log(doctorResult2.output);
     }).catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
     });
