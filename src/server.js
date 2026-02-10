@@ -1705,6 +1705,19 @@ const server = app.listen(PORT, async () => {
             console.log(`[wrapper] post-gateway doctor --fix exit=${doctorResult.code}`);
             if (doctorResult.output) console.log(doctorResult.output);
 
+            // Enable Telegram channel in running gateway using channels add
+            // This is needed because config set only writes to file, but doesn't enable in-memory
+            if (AUTO_CONFIG_TELEGRAM_TOKEN) {
+              console.log("[wrapper] enabling Telegram channel in running gateway...");
+              const channelResult = await runCmd(OPENCLAW_NODE, clawArgs([
+                "channels", "add",
+                "--channel", "telegram",
+                "--token", AUTO_CONFIG_TELEGRAM_TOKEN
+              ]));
+              console.log(`[wrapper] channels add telegram exit=${channelResult.code}`);
+              if (channelResult.output) console.log(channelResult.output);
+            }
+
             // Restore config permissions
             if (originalMode !== null) {
               try {
