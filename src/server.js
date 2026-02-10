@@ -793,7 +793,7 @@ async function autoConfigureFromEnv() {
   // Pre-gateway doctor --fix: fixes config file format BEFORE gateway starts.
   // This ensures the config is correct so that post-gateway doctor --fix
   // only needs to enable channels in-memory (no config write → no SIGUSR1 restart).
-  console.log("[auto-config] BUILD_ID=v20260210e - running pre-gateway doctor --fix to fix config...");
+  console.log("[auto-config] BUILD_ID=v20260210f - running pre-gateway doctor --fix to fix config...");
   const preDoctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
   console.log(`[auto-config] pre-gateway doctor --fix exit=${preDoctorResult.code}`);
   if (preDoctorResult.output) console.log(preDoctorResult.output);
@@ -1686,12 +1686,34 @@ const server = app.listen(PORT, async () => {
           
           ensureGatewayRunning().then(async () => {
             // Post-gateway doctor --fix: enables channels (Telegram) in-memory via gateway API.
-            // Config was already fixed by pre-gateway doctor --fix, so this should NOT write
-            // to config file → no SIGUSR1 restart → channels stay enabled.
+            // CRITICAL: Make config read-only BEFORE running doctor --fix.
+            // doctor --fix always updates meta.lastTouchedAt which triggers gateway SIGUSR1 restart,
+            // losing the in-memory Telegram state. By making config read-only, doctor --fix can
+            // still talk to the gateway API to enable channels, but can't write config → no SIGUSR1.
+            const cfgPath = configPath();
+            let originalMode = null;
+            try {
+              originalMode = fs.statSync(cfgPath).mode;
+              fs.chmodSync(cfgPath, 0o444);
+              console.log("[wrapper] config set to read-only to prevent SIGUSR1 restart");
+            } catch (err) {
+              console.warn(`[wrapper] could not make config read-only: ${err.message}`);
+            }
+
             console.log("[wrapper] gateway running, running doctor --fix to enable channels...");
             const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
             console.log(`[wrapper] post-gateway doctor --fix exit=${doctorResult.code}`);
             if (doctorResult.output) console.log(doctorResult.output);
+
+            // Restore config permissions
+            if (originalMode !== null) {
+              try {
+                fs.chmodSync(cfgPath, originalMode);
+                console.log("[wrapper] config permissions restored");
+              } catch (err) {
+                console.warn(`[wrapper] could not restore config permissions: ${err.message}`);
+              }
+            }
           }).catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
@@ -1714,11 +1736,31 @@ const server = app.listen(PORT, async () => {
     await ensureWebSocketConfig();
     
     ensureGatewayRunning().then(async () => {
-      // Post-gateway doctor --fix: enables channels in-memory
+      // Make config read-only to prevent doctor --fix from triggering SIGUSR1 restart
+      const cfgPath = configPath();
+      let originalMode = null;
+      try {
+        originalMode = fs.statSync(cfgPath).mode;
+        fs.chmodSync(cfgPath, 0o444);
+        console.log("[wrapper] config set to read-only to prevent SIGUSR1 restart");
+      } catch (err) {
+        console.warn(`[wrapper] could not make config read-only: ${err.message}`);
+      }
+
       console.log("[wrapper] gateway running at boot, running doctor --fix...");
       const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
       console.log(`[wrapper] boot doctor --fix exit=${doctorResult.code}`);
       if (doctorResult.output) console.log(doctorResult.output);
+
+      // Restore config permissions
+      if (originalMode !== null) {
+        try {
+          fs.chmodSync(cfgPath, originalMode);
+          console.log("[wrapper] config permissions restored");
+        } catch (err) {
+          console.warn(`[wrapper] could not restore config permissions: ${err.message}`);
+        }
+      }
     }).catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
     });
