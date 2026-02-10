@@ -670,12 +670,13 @@ const AUTO_CONFIG_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY?.trim();
 const AUTO_CONFIG_OPENAI_KEY = process.env.OPENAI_API_KEY?.trim();
 const AUTO_CONFIG_GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
 const AUTO_CONFIG_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY?.trim();
+const AUTO_CONFIG_OPENROUTER_KEY = process.env.OPENROUTER_API_KEY?.trim();
 const AUTO_CONFIG_DEFAULT_MODEL = process.env.DEFAULT_MODEL?.trim();
 
 function hasAutoConfigEnvVars() {
   // Need at least one AI API key to auto-configure
-  const hasKey = !!(AUTO_CONFIG_ANTHROPIC_KEY || AUTO_CONFIG_OPENAI_KEY || AUTO_CONFIG_GOOGLE_KEY || AUTO_CONFIG_DEEPSEEK_KEY);
-  console.log(`[auto-config] env check: TELEGRAM=${!!AUTO_CONFIG_TELEGRAM_TOKEN} ANTHROPIC=${!!AUTO_CONFIG_ANTHROPIC_KEY} OPENAI=${!!AUTO_CONFIG_OPENAI_KEY} GOOGLE=${!!AUTO_CONFIG_GOOGLE_KEY} DEEPSEEK=${!!AUTO_CONFIG_DEEPSEEK_KEY} hasKey=${hasKey}`);
+  const hasKey = !!(AUTO_CONFIG_ANTHROPIC_KEY || AUTO_CONFIG_OPENAI_KEY || AUTO_CONFIG_GOOGLE_KEY || AUTO_CONFIG_DEEPSEEK_KEY || AUTO_CONFIG_OPENROUTER_KEY);
+  console.log(`[auto-config] env check: TELEGRAM=${!!AUTO_CONFIG_TELEGRAM_TOKEN} ANTHROPIC=${!!AUTO_CONFIG_ANTHROPIC_KEY} OPENAI=${!!AUTO_CONFIG_OPENAI_KEY} GOOGLE=${!!AUTO_CONFIG_GOOGLE_KEY} DEEPSEEK=${!!AUTO_CONFIG_DEEPSEEK_KEY} OPENROUTER=${!!AUTO_CONFIG_OPENROUTER_KEY} hasKey=${hasKey}`);
   return hasKey;
 }
 
@@ -711,6 +712,9 @@ async function autoConfigureFromEnv() {
     // DeepSeek uses OpenAI-compatible API
     authChoice = "openai-api-key";
     authSecret = AUTO_CONFIG_DEEPSEEK_KEY;
+  } else if (AUTO_CONFIG_OPENROUTER_KEY) {
+    authChoice = "openrouter-api-key";
+    authSecret = AUTO_CONFIG_OPENROUTER_KEY;
   }
 
   const payload = {
