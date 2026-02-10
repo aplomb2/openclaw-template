@@ -788,15 +788,23 @@ async function autoConfigureFromEnv() {
     if (telegramResult.output) {
       console.log(telegramResult.output);
     }
+
+    // CRITICAL: Also enable the Telegram plugin in plugins.entries.
+    // The gateway needs BOTH channels.telegram AND plugins.entries.telegram to be enabled.
+    // Without this, gateway shows "Telegram configured, not enabled yet."
+    console.log("[auto-config] enabling Telegram plugin entry...");
+    const pluginResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "plugins.entries.telegram", '{"enabled":true}'
+    ]));
+    console.log(`[auto-config] telegram plugin entry exit=${pluginResult.code}`);
+    if (pluginResult.output) {
+      console.log(pluginResult.output);
+    }
   }
 
-  // Pre-gateway doctor --fix: fixes config file format BEFORE gateway starts.
-  // This ensures the config is correct so that post-gateway doctor --fix
-  // only needs to enable channels in-memory (no config write → no SIGUSR1 restart).
-  console.log("[auto-config] BUILD_ID=v20260210f - running pre-gateway doctor --fix to fix config...");
-  const preDoctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
-  console.log(`[auto-config] pre-gateway doctor --fix exit=${preDoctorResult.code}`);
-  if (preDoctorResult.output) console.log(preDoctorResult.output);
+  // No doctor --fix needed: channels.telegram + plugins.entries.telegram are both set above.
+  // Gateway will activate Telegram automatically on startup.
+  console.log("[auto-config] BUILD_ID=v20260210g - Telegram config complete (channel + plugin entry)");
 
   // Set ALL available API keys in config (not just the primary one used for onboard)
   // This allows users to switch between providers or use fallback models
@@ -1685,48 +1693,9 @@ const server = app.listen(PORT, async () => {
           await ensureWebSocketConfig();
           
           ensureGatewayRunning().then(async () => {
-            // Post-gateway doctor --fix: enables channels (Telegram) in-memory via gateway API.
-            // CRITICAL: Make config read-only BEFORE running doctor --fix.
-            // doctor --fix always updates meta.lastTouchedAt which triggers gateway SIGUSR1 restart,
-            // losing the in-memory Telegram state. By making config read-only, doctor --fix can
-            // still talk to the gateway API to enable channels, but can't write config → no SIGUSR1.
-            const cfgPath = configPath();
-            let originalMode = null;
-            try {
-              originalMode = fs.statSync(cfgPath).mode;
-              fs.chmodSync(cfgPath, 0o444);
-              console.log("[wrapper] config set to read-only to prevent SIGUSR1 restart");
-            } catch (err) {
-              console.warn(`[wrapper] could not make config read-only: ${err.message}`);
-            }
-
-            console.log("[wrapper] gateway running, running doctor --fix to enable channels...");
-            const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
-            console.log(`[wrapper] post-gateway doctor --fix exit=${doctorResult.code}`);
-            if (doctorResult.output) console.log(doctorResult.output);
-
-            // Enable Telegram channel in running gateway using channels add
-            // This is needed because config set only writes to file, but doesn't enable in-memory
-            if (AUTO_CONFIG_TELEGRAM_TOKEN) {
-              console.log("[wrapper] enabling Telegram channel in running gateway...");
-              const channelResult = await runCmd(OPENCLAW_NODE, clawArgs([
-                "channels", "add",
-                "--channel", "telegram",
-                "--token", AUTO_CONFIG_TELEGRAM_TOKEN
-              ]));
-              console.log(`[wrapper] channels add telegram exit=${channelResult.code}`);
-              if (channelResult.output) console.log(channelResult.output);
-            }
-
-            // Restore config permissions
-            if (originalMode !== null) {
-              try {
-                fs.chmodSync(cfgPath, originalMode);
-                console.log("[wrapper] config permissions restored");
-              } catch (err) {
-                console.warn(`[wrapper] could not restore config permissions: ${err.message}`);
-              }
-            }
+            // No doctor --fix needed. Both channels.telegram and plugins.entries.telegram
+            // are configured before gateway starts, so Telegram activates automatically.
+            console.log("[wrapper] gateway started successfully after auto-config");
           }).catch((err) => {
             console.error(`[wrapper] failed to start gateway after auto-config: ${err.message}`);
           });
@@ -1749,31 +1718,7 @@ const server = app.listen(PORT, async () => {
     await ensureWebSocketConfig();
     
     ensureGatewayRunning().then(async () => {
-      // Make config read-only to prevent doctor --fix from triggering SIGUSR1 restart
-      const cfgPath = configPath();
-      let originalMode = null;
-      try {
-        originalMode = fs.statSync(cfgPath).mode;
-        fs.chmodSync(cfgPath, 0o444);
-        console.log("[wrapper] config set to read-only to prevent SIGUSR1 restart");
-      } catch (err) {
-        console.warn(`[wrapper] could not make config read-only: ${err.message}`);
-      }
-
-      console.log("[wrapper] gateway running at boot, running doctor --fix...");
-      const doctorResult = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));
-      console.log(`[wrapper] boot doctor --fix exit=${doctorResult.code}`);
-      if (doctorResult.output) console.log(doctorResult.output);
-
-      // Restore config permissions
-      if (originalMode !== null) {
-        try {
-          fs.chmodSync(cfgPath, originalMode);
-          console.log("[wrapper] config permissions restored");
-        } catch (err) {
-          console.warn(`[wrapper] could not restore config permissions: ${err.message}`);
-        }
-      }
+      console.log("[wrapper] gateway started successfully at boot");
     }).catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
     });
