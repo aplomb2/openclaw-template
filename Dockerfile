@@ -8,6 +8,24 @@ RUN apt-get update \
     procps \
     python3 \
     build-essential \
+    # Browser dependencies for Chrome/Chromium web browsing capability
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libdrm2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libxss1 \
+    libasound2 \
+    libgtk-3-0 \
+    libxshmfence1 \
+    libgconf-2-4 \
+    libxtst6 \
+    libatspi2.0-0 \
+    libxkbcommon0 \
+    fonts-liberation \
   && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g openclaw@latest
@@ -18,7 +36,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 # Cache buster - change this to force rebuild
-ARG CACHEBUST=v20260210g
+ARG CACHEBUST=v20260212-chromium
 
 COPY src ./src
 COPY start.sh ./start.sh
