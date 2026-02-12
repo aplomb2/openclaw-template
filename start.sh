@@ -9,6 +9,13 @@
 CONFIG_FILE="$HOME/.openclaw/openclaw.json"
 OPENCLAW_CMD="node /usr/local/lib/node_modules/openclaw/dist/entry.js"
 
+# Configure browser automation: use openclaw's managed browser profile
+# This avoids Chrome Relay dependency and provides a fully controlled headless browser
+configure_browser() {
+  echo "[start.sh] Configuring browser: defaultProfile=openclaw"
+  $OPENCLAW_CMD config set browser.defaultProfile openclaw 2>/dev/null || true
+}
+
 # Check if auto-config will handle doctor --fix
 # Auto-config runs when ANY AI API key env var is set
 HAS_AUTO_CONFIG_KEYS=false
@@ -32,6 +39,7 @@ if [ "$HAS_AUTO_CONFIG_KEYS" = "false" ]; then
         $OPENCLAW_CMD doctor --fix
         echo "[start.sh] doctor --fix completed with exit code: $?"
 
+        configure_browser
         break
       fi
       sleep 1
@@ -39,6 +47,11 @@ if [ "$HAS_AUTO_CONFIG_KEYS" = "false" ]; then
   ) &
 else
   echo "[start.sh] Auto-config env vars detected, skipping background doctor --fix (server.js handles it)"
+  # Configure browser after a delay to let auto-config create the config file first
+  (
+    sleep 15
+    configure_browser
+  ) &
 fi
 
 # Start the main server (foreground)
