@@ -802,6 +802,29 @@ async function autoConfigureFromEnv() {
     }
   }
 
+  // Configure ClawRouters if key is provided
+  const clawRoutersKey = process.env.CLAWROUTERS_KEY?.trim();
+  if (clawRoutersKey) {
+    console.log("[auto-config] configuring ClawRouters provider...");
+    const crProvider = {
+      baseUrl: "https://www.clawrouters.com/api/v1",
+      apiKey: clawRoutersKey,
+      api: "openai-completions",
+      models: [{ id: "auto", name: "ClawRouters Auto" }],
+    };
+    const crResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "models.providers.clawrouters", JSON.stringify(crProvider)
+    ]));
+    console.log(`[auto-config] ClawRouters provider exit=${crResult.code}`);
+
+    // Set ClawRouters as the default model
+    console.log("[auto-config] setting default model to clawrouters/auto...");
+    const modelResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "agents.defaults.model.primary", "clawrouters/auto"
+    ]));
+    console.log(`[auto-config] default model set exit=${modelResult.code}`);
+  }
+
   // No doctor --fix needed: channels.telegram + plugins.entries.telegram are both set above.
   // Gateway will activate Telegram automatically on startup.
   console.log("[auto-config] BUILD_ID=v20260210g - Telegram config complete (channel + plugin entry)");
