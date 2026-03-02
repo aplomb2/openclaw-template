@@ -671,12 +671,13 @@ const AUTO_CONFIG_OPENAI_KEY = process.env.OPENAI_API_KEY?.trim();
 const AUTO_CONFIG_GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
 const AUTO_CONFIG_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY?.trim();
 const AUTO_CONFIG_OPENROUTER_KEY = process.env.OPENROUTER_API_KEY?.trim();
+const AUTO_CONFIG_CLAWROUTERS_KEY = process.env.CLAWROUTERS_KEY?.trim();
 const AUTO_CONFIG_DEFAULT_MODEL = process.env.DEFAULT_MODEL?.trim();
 
 function hasAutoConfigEnvVars() {
   // Need at least one AI API key to auto-configure
-  const hasKey = !!(AUTO_CONFIG_ANTHROPIC_KEY || AUTO_CONFIG_OPENAI_KEY || AUTO_CONFIG_GOOGLE_KEY || AUTO_CONFIG_DEEPSEEK_KEY || AUTO_CONFIG_OPENROUTER_KEY);
-  console.log(`[auto-config] env check: TELEGRAM=${!!AUTO_CONFIG_TELEGRAM_TOKEN} ANTHROPIC=${!!AUTO_CONFIG_ANTHROPIC_KEY} OPENAI=${!!AUTO_CONFIG_OPENAI_KEY} GOOGLE=${!!AUTO_CONFIG_GOOGLE_KEY} DEEPSEEK=${!!AUTO_CONFIG_DEEPSEEK_KEY} OPENROUTER=${!!AUTO_CONFIG_OPENROUTER_KEY} hasKey=${hasKey}`);
+  const hasKey = !!(AUTO_CONFIG_ANTHROPIC_KEY || AUTO_CONFIG_OPENAI_KEY || AUTO_CONFIG_GOOGLE_KEY || AUTO_CONFIG_DEEPSEEK_KEY || AUTO_CONFIG_OPENROUTER_KEY || AUTO_CONFIG_CLAWROUTERS_KEY);
+  console.log(`[auto-config] env check: TELEGRAM=${!!AUTO_CONFIG_TELEGRAM_TOKEN} ANTHROPIC=${!!AUTO_CONFIG_ANTHROPIC_KEY} OPENAI=${!!AUTO_CONFIG_OPENAI_KEY} GOOGLE=${!!AUTO_CONFIG_GOOGLE_KEY} DEEPSEEK=${!!AUTO_CONFIG_DEEPSEEK_KEY} OPENROUTER=${!!AUTO_CONFIG_OPENROUTER_KEY} CLAWROUTERS=${!!AUTO_CONFIG_CLAWROUTERS_KEY} hasKey=${hasKey}`);
   return hasKey;
 }
 
@@ -716,6 +717,11 @@ async function autoConfigureFromEnv() {
   } else if (AUTO_CONFIG_OPENROUTER_KEY) {
     authChoice = "openrouter-api-key";
     authSecret = AUTO_CONFIG_OPENROUTER_KEY;
+  } else if (AUTO_CONFIG_CLAWROUTERS_KEY) {
+    // ClawRouters uses OpenAI-compatible API — onboard with it as OpenAI key,
+    // then the ClawRouters provider block below overrides the actual routing
+    authChoice = "openai-api-key";
+    authSecret = AUTO_CONFIG_CLAWROUTERS_KEY;
   }
 
   const payload = {
