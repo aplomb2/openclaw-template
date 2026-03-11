@@ -282,6 +282,19 @@ async function sendHeartbeat() {
       lastHeartbeat = new Date();
       console.log(`[heartbeat] sent successfully: ${status}`);
       
+      // Process pending commands from server
+      try {
+        const result = await response.json();
+        if (result.commands && Array.isArray(result.commands) && result.commands.length > 0) {
+          console.log(`[heartbeat] received ${result.commands.length} pending command(s)`);
+          for (const cmd of result.commands) {
+            await processCommand(cmd);
+          }
+        }
+      } catch (parseErr) {
+        // Response may not be JSON, that's fine
+      }
+      
       // Also report usage stats if we have any
       if (usageStats.messagesThisSession > 0) {
         await reportStats();
@@ -395,6 +408,47 @@ async function fetchPersonality() {
     console.error(`[personality] fetch error: ${err.message}`);
   }
   return { personality: null, template: null };
+}
+
+// ============== Process Pending Commands from OneClaw Dashboard ==============
+
+async function processCommand(cmd) {
+  console.log(`[command] processing: ${cmd.type} (id: ${cmd.id})`);
+  try {
+    switch (cmd.type) {
+      case 'apply_template':
+        await applyTemplateFromCommand(cmd);
+        break;
+      default:
+        console.warn(`[command] unknown command type: ${cmd.type}`);
+    }
+  } catch (err) {
+    console.error(`[command] error processing ${cmd.type}: ${err.message}`);
+  }
+}
+
+async function applyTemplateFromCommand(cmd) {
+  const { templateId, soulMd, skills } = cmd;
+  console.log(`[command] applying template: ${templateId} (skills: ${(skills || []).join(', ') || 'none'})`);
+
+  // Write SOUL.md
+  if (soulMd) {
+    const soulPath = path.join(WORKSPACE_DIR, 'SOUL.md');
+    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+    fs.writeFileSync(soulPath, soulMd, 'utf8');
+    console.log(`[command] wrote SOUL.md (${soulMd.length} chars)`);
+  }
+
+  // Skills from templates are all built-in to openclaw and auto-discovered.
+  // Log them for visibility but no installation needed.
+  if (skills && skills.length > 0) {
+    console.log(`[command] template skills (built-in, auto-loaded): ${skills.join(', ')}`);
+  }
+
+  // Restart gateway to pick up the new SOUL.md
+  console.log('[command] restarting gateway to apply template...');
+  await restartGateway();
+  console.log('[command] template applied and gateway restarted');
 }
 
 // Environment variable for template ID
