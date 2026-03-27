@@ -697,12 +697,13 @@ async function ensureWebSocketConfig() {
     ]));
     console.log(`[startup-fix] allowInsecureAuth configured (exit=${authResult.code})`);
 
-    // Grant operator scope to Control UI connections (required for chat.send in newer OpenClaw versions)
-    console.log("[startup-fix] ensuring controlUi.operatorScope=full...");
-    const scopeResult = await runCmd(OPENCLAW_NODE, clawArgs([
-      "config", "set", "gateway.controlUi.operatorScope", "full"
+    // Disable device identity requirement for Control UI (required since OpenClaw v2026.2.14)
+    // Without this, webchat connections get zero scopes and can't send messages
+    console.log("[startup-fix] ensuring dangerouslyDisableDeviceAuth=true...");
+    const deviceAuthResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "gateway.controlUi.dangerouslyDisableDeviceAuth", "true"
     ]));
-    console.log(`[startup-fix] operatorScope configured (exit=${scopeResult.code})`);
+    console.log(`[startup-fix] dangerouslyDisableDeviceAuth configured (exit=${deviceAuthResult.code})`);
     
     let origins = DEFAULT_ALLOWED_ORIGINS;
     if (ALLOWED_ORIGINS_ENV) {
