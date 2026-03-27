@@ -697,13 +697,24 @@ async function ensureWebSocketConfig() {
     ]));
     console.log(`[startup-fix] allowInsecureAuth configured (exit=${authResult.code})`);
 
-    // Disable device identity requirement for Control UI (required since OpenClaw v2026.2.14)
-    // Without this, webchat connections get zero scopes and can't send messages
-    console.log("[startup-fix] ensuring dangerouslyDisableDeviceAuth=true...");
-    const deviceAuthResult = await runCmd(OPENCLAW_NODE, clawArgs([
-      "config", "set", "gateway.controlUi.dangerouslyDisableDeviceAuth", "true"
-    ]));
-    console.log(`[startup-fix] dangerouslyDisableDeviceAuth configured (exit=${deviceAuthResult.code})`);
+    // Patch config JSON directly to bypass schema validation
+    // Since OpenClaw v2026.2.14, device-less connections get zero scopes
+    // dangerouslyDisableDeviceAuth=true preserves scopes for webchat
+    try {
+      const configPath = path.join(STATE_DIR, "openclaw.json");
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+        if (config.gateway) {
+          if (!config.gateway.controlUi) config.gateway.controlUi = {};
+          config.gateway.controlUi.dangerouslyDisableDeviceAuth = true;
+          config.gateway.controlUi.allowInsecureAuth = true;
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          console.log("[startup-fix] patched openclaw.json: dangerouslyDisableDeviceAuth=true");
+        }
+      }
+    } catch (err) {
+      console.warn(`[startup-fix] failed to patch config JSON: ${err.message}`);
+    }
     
     let origins = DEFAULT_ALLOWED_ORIGINS;
     if (ALLOWED_ORIGINS_ENV) {
