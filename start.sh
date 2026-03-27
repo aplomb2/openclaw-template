@@ -19,7 +19,7 @@ configure_browser() {
 # Check if auto-config will handle doctor --fix
 # Auto-config runs when ANY AI API key env var is set
 HAS_AUTO_CONFIG_KEYS=false
-if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ] || [ -n "$GOOGLE_GENERATIVE_AI_API_KEY" ] || [ -n "$DEEPSEEK_API_KEY" ] || [ -n "$OPENROUTER_API_KEY" ]; then
+if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ] || [ -n "$GOOGLE_GENERATIVE_AI_API_KEY" ] || [ -n "$DEEPSEEK_API_KEY" ] || [ -n "$OPENROUTER_API_KEY" ] || [ -n "$CLAWROUTERS_KEY" ]; then
   HAS_AUTO_CONFIG_KEYS=true
 fi
 
