@@ -696,6 +696,13 @@ async function ensureWebSocketConfig() {
       "config", "set", "gateway.controlUi.allowInsecureAuth", "true"
     ]));
     console.log(`[startup-fix] allowInsecureAuth configured (exit=${authResult.code})`);
+
+    // Grant operator scope to Control UI connections (required for chat.send in newer OpenClaw versions)
+    console.log("[startup-fix] ensuring controlUi.operatorScope=full...");
+    const scopeResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "gateway.controlUi.operatorScope", "full"
+    ]));
+    console.log(`[startup-fix] operatorScope configured (exit=${scopeResult.code})`);
     
     let origins = DEFAULT_ALLOWED_ORIGINS;
     if (ALLOWED_ORIGINS_ENV) {
