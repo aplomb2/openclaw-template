@@ -884,9 +884,15 @@ async function autoConfigureFromEnv() {
   // Configure ClawRouters if key is provided
   const clawRoutersKey = process.env.CLAWROUTERS_KEY?.trim();
   if (clawRoutersKey) {
-    console.log("[auto-config] configuring ClawRouters provider...");
+    // Route through local proxy when ONECLAW_END_USER is set, so the bot's
+    // chat/completions requests get `user: oneclaw_<uid>` injected and
+    // ClawRouters can attribute shared-key usage per-user.
+    const baseUrl = ONECLAW_END_USER
+      ? CR_PROXY_BASE_URL
+      : "https://www.clawrouters.com/api/v1";
+    console.log(`[auto-config] configuring ClawRouters provider (baseUrl=${baseUrl})...`);
     const crProvider = {
-      baseUrl: "https://www.clawrouters.com/api/v1",
+      baseUrl,
       apiKey: clawRoutersKey,
       api: "openai-completions",
       models: [{ id: "auto", name: "ClawRouters Auto" }],
@@ -1002,6 +1008,70 @@ function requireSetupAuth(req, res, next) {
   }
   return next();
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// ClawRouters loopback proxy — injects `user: ONECLAW_END_USER` into
+// every /chat/completions body so shared-key usage can be attributed
+// back to the OneClaw end-user. Listens on 127.0.0.1 only (no external
+// exposure). Upstream OpenClaw binary is configured to use this proxy
+// as its ClawRouters baseUrl when ONECLAW_END_USER is set.
+// ───────────────────────────────────────────────────────────────────────
+const CR_PROXY_PORT = Number.parseInt(process.env.CR_PROXY_PORT ?? "18791", 10);
+const CR_UPSTREAM = "https://www.clawrouters.com";
+const CR_PROXY_BASE_URL = `http://127.0.0.1:${CR_PROXY_PORT}/api/v1`;
+const ONECLAW_END_USER = process.env.ONECLAW_END_USER?.trim() || "";
+
+function startClawRoutersProxy() {
+  if (!ONECLAW_END_USER) {
+    console.log("[cr-proxy] ONECLAW_END_USER not set, skipping proxy");
+    return null;
+  }
+
+  const proxy = httpProxy.createProxyServer({
+    target: CR_UPSTREAM,
+    changeOrigin: true,
+    secure: true,
+    selfHandleResponse: false,
+  });
+
+  // Inject `user` field into JSON bodies (only when not already set by caller).
+  proxy.on("proxyReq", (proxyReq, req) => {
+    if (req.method !== "POST") return;
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return;
+
+    // Don't overwrite if the bot already provided a `user` field.
+    const body = { ...req.body };
+    if (!body.user) body.user = ONECLAW_END_USER;
+
+    const bodyStr = JSON.stringify(body);
+    proxyReq.setHeader("Content-Type", "application/json");
+    proxyReq.setHeader("Content-Length", Buffer.byteLength(bodyStr));
+    proxyReq.write(bodyStr);
+  });
+
+  proxy.on("error", (err, _req, res) => {
+    console.error("[cr-proxy] upstream error:", err.message);
+    if (res && !res.headersSent) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Bad gateway", detail: err.message }));
+    }
+  });
+
+  const proxyApp = express();
+  // Generous limit so large context messages still get injected
+  proxyApp.use(express.json({ limit: "20mb" }));
+  proxyApp.use((req, res) => {
+    proxy.web(req, res);
+  });
+
+  proxyApp.listen(CR_PROXY_PORT, "127.0.0.1", () => {
+    console.log(
+      `[cr-proxy] listening on ${CR_PROXY_BASE_URL} → ${CR_UPSTREAM} (injecting user=${ONECLAW_END_USER})`,
+    );
+  });
+}
+
+startClawRoutersProxy();
 
 const app = express();
 app.disable("x-powered-by");
