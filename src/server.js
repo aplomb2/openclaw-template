@@ -1021,6 +1021,27 @@ const CR_UPSTREAM = "https://www.clawrouters.com";
 const CR_PROXY_BASE_URL = `http://127.0.0.1:${CR_PROXY_PORT}/api/v1`;
 const ONECLAW_END_USER = process.env.ONECLAW_END_USER?.trim() || "";
 
+// Only inject `user` on these chat/completion endpoints.
+// GET /models, POST /files (multipart), POST /embeddings, etc. pass through untouched.
+const CR_INJECT_PATHS = [
+  "/api/v1/chat/completions",
+  "/api/v1/completions",
+  "/api/v1/messages",
+];
+
+function shouldInjectUser(req) {
+  if (req.method !== "POST") return false;
+  const urlPath = req.url.split("?")[0];
+  if (!CR_INJECT_PATHS.some((p) => urlPath === p || urlPath.endsWith(p))) return false;
+  // Content-Type must be JSON — never touch multipart/form-data, binary, etc.
+  const ct = (req.headers["content-type"] || "").toLowerCase();
+  if (!ct.includes("application/json")) return false;
+  // Body must be a non-empty object successfully parsed by express.json().
+  if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return false;
+  if (Object.keys(req.body).length === 0) return false;
+  return true;
+}
+
 function startClawRoutersProxy() {
   if (!ONECLAW_END_USER) {
     console.log("[cr-proxy] ONECLAW_END_USER not set, skipping proxy");
@@ -1032,18 +1053,17 @@ function startClawRoutersProxy() {
     changeOrigin: true,
     secure: true,
     selfHandleResponse: false,
+    // Long enough for slow streaming completions; short enough to surface stuck connections.
+    proxyTimeout: 180_000,
+    timeout: 180_000,
   });
 
-  // Inject `user` field into JSON bodies (only when not already set by caller).
+  // Inject `user` into JSON bodies only on whitelisted chat endpoints.
   proxy.on("proxyReq", (proxyReq, req) => {
-    if (req.method !== "POST") return;
-    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return;
+    if (!shouldInjectUser(req)) return;
+    if (req.body.user) return; // caller already set it — respect it
 
-    // Don't overwrite if the bot already provided a `user` field.
-    const body = { ...req.body };
-    if (!body.user) body.user = ONECLAW_END_USER;
-
-    const bodyStr = JSON.stringify(body);
+    const bodyStr = JSON.stringify({ ...req.body, user: ONECLAW_END_USER });
     proxyReq.setHeader("Content-Type", "application/json");
     proxyReq.setHeader("Content-Length", Buffer.byteLength(bodyStr));
     proxyReq.write(bodyStr);
@@ -1051,24 +1071,31 @@ function startClawRoutersProxy() {
 
   proxy.on("error", (err, _req, res) => {
     console.error("[cr-proxy] upstream error:", err.message);
-    if (res && !res.headersSent) {
+    if (res && typeof res.writeHead === "function" && !res.headersSent) {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Bad gateway", detail: err.message }));
     }
   });
 
   const proxyApp = express();
-  // Generous limit so large context messages still get injected
+  // Parse JSON bodies up to 20MB; non-JSON bodies are left as raw streams that pass through.
   proxyApp.use(express.json({ limit: "20mb" }));
   proxyApp.use((req, res) => {
     proxy.web(req, res);
   });
 
-  proxyApp.listen(CR_PROXY_PORT, "127.0.0.1", () => {
-    console.log(
-      `[cr-proxy] listening on ${CR_PROXY_BASE_URL} → ${CR_UPSTREAM} (injecting user=${ONECLAW_END_USER})`,
-    );
-  });
+  proxyApp
+    .listen(CR_PROXY_PORT, "127.0.0.1", () => {
+      console.log(
+        `[cr-proxy] listening on ${CR_PROXY_BASE_URL} → ${CR_UPSTREAM} (inject user=${ONECLAW_END_USER} on ${CR_INJECT_PATHS.join(", ")})`,
+      );
+    })
+    .on("error", (err) => {
+      // Proxy bind failure must NOT crash the main server. Upstream openclaw will
+      // try to connect to the loopback URL and get ECONNREFUSED — that's a degraded
+      // state but at least the instance boots.
+      console.error(`[cr-proxy] failed to bind ${CR_PROXY_PORT}:`, err.message);
+    });
 }
 
 startClawRoutersProxy();
