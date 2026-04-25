@@ -937,10 +937,14 @@ async function autoConfigureFromEnv() {
     ]));
     console.log(`[auto-config] openai provider override exit=${openaiResult.code}`);
 
-    console.log("[auto-config] enabling image_generate tool with gpt-image-1 primary...");
+    // openai/gpt-image-1 is the only safe choice as of 2026-04-24:
+    //   - gpt-image-2 launched 2026-04-21 but API opens "early May 2026"
+    //   - dall-e-3 + dall-e-2 retire 2026-05-12 (would be a timed bomb)
+    // Leave fallbacks empty rather than wire a model that's about to break;
+    // a rebuild can add gpt-image-2 as primary once OpenAI opens API access.
+    console.log("[auto-config] enabling image_generate tool with gpt-image-1...");
     const imageGenConfig = {
       primary: "openai/gpt-image-1",
-      fallbacks: ["openai/dall-e-3"],
     };
     const imageGenResult = await runCmd(OPENCLAW_NODE, clawArgs([
       "config", "set", "--json", "agents.defaults.imageGenerationModel", JSON.stringify(imageGenConfig)
