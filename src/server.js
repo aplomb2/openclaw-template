@@ -891,11 +891,23 @@ async function autoConfigureFromEnv() {
       ? CR_PROXY_BASE_URL
       : "https://www.clawrouters.com/api/v1";
     console.log(`[auto-config] configuring ClawRouters provider (baseUrl=${baseUrl})...`);
+    // Vision (image input): each declared model needs `input: ["text","image"]`
+    // so OpenClaw treats inbound photos as native multimodal content instead
+    // of running its local OCR/file-path fallback. Without this field the
+    // bot replies "I can't see the image" even though the upstream model
+    // (Claude / GPT / Gemini) is fully vision-capable.
+    const visionModels = [
+      { id: "auto",                name: "ClawRouters Auto",     input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
+      { id: "claude-sonnet-4.6",   name: "Claude Sonnet 4.6",    input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
+      { id: "claude-haiku-4.5",    name: "Claude Haiku 4.5",     input: ["text", "image"], contextWindow: 200000, maxTokens: 8192 },
+      { id: "gpt-5.4",             name: "GPT-5.4",              input: ["text", "image"], contextWindow: 1050000, maxTokens: 16384 },
+      { id: "gemini-3-pro",        name: "Gemini 3 Pro",         input: ["text", "image"], contextWindow: 1000000, maxTokens: 8192 },
+    ];
     const crProvider = {
       baseUrl,
       apiKey: clawRoutersKey,
       api: "openai-completions",
-      models: [{ id: "auto", name: "ClawRouters Auto" }],
+      models: visionModels,
     };
     const crResult = await runCmd(OPENCLAW_NODE, clawArgs([
       "config", "set", "--json", "models.providers.clawrouters", JSON.stringify(crProvider)
@@ -908,11 +920,48 @@ async function autoConfigureFromEnv() {
       "config", "set", "agents.defaults.model.primary", "clawrouters/auto"
     ]));
     console.log(`[auto-config] default model set exit=${modelResult.code}`);
+
+    // Image generation: redirect OpenClaw's built-in `openai` provider at
+    // ClawRouters so the image_generate tool calls our /v1/images/generations
+    // (DALL-E 3 / GPT-Image-1 / Gemini 3 Flash Image, OpenAI-compatible).
+    // OpenClaw resolves `openai/<model>` → POST <baseUrl>/images/generations,
+    // which is exactly our endpoint. Means the user's `cr_` key covers chat,
+    // vision, AND image gen — no separate OpenAI key required.
+    console.log(`[auto-config] redirecting openai provider to ClawRouters for image gen (baseUrl=${baseUrl})...`);
+    const openaiOverride = {
+      baseUrl,
+      apiKey: clawRoutersKey,
+    };
+    const openaiResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "models.providers.openai", JSON.stringify(openaiOverride)
+    ]));
+    console.log(`[auto-config] openai provider override exit=${openaiResult.code}`);
+
+    console.log("[auto-config] enabling image_generate tool with gpt-image-1 primary...");
+    const imageGenConfig = {
+      primary: "openai/gpt-image-1",
+      fallbacks: ["openai/dall-e-3"],
+    };
+    const imageGenResult = await runCmd(OPENCLAW_NODE, clawArgs([
+      "config", "set", "--json", "agents.defaults.imageGenerationModel", JSON.stringify(imageGenConfig)
+    ]));
+    console.log(`[auto-config] image_generate config exit=${imageGenResult.code}`);
+
+    // Disable the skill-based image-gen entries that would otherwise compete
+    // with the tool path and require their own OpenAI / Gemini keys (which
+    // we don't ship to deployed instances). The tool path above is enough.
+    console.log("[auto-config] disabling skill-based image-gen entries...");
+    for (const skillKey of ["openai-image-gen", "nano-banana-pro"]) {
+      const r = await runCmd(OPENCLAW_NODE, clawArgs([
+        "config", "set", "--json", `skills.entries.${skillKey}`, JSON.stringify({ enabled: false })
+      ]));
+      console.log(`[auto-config] disable ${skillKey} exit=${r.code}`);
+    }
   }
 
   // No doctor --fix needed: channels.telegram + plugins.entries.telegram are both set above.
   // Gateway will activate Telegram automatically on startup.
-  console.log("[auto-config] BUILD_ID=v20260210g - Telegram config complete (channel + plugin entry)");
+  console.log("[auto-config] BUILD_ID=v20260424a - vision models + image_generate via ClawRouters");
 
   // Set ALL available API keys in config (not just the primary one used for onboard)
   // This allows users to switch between providers or use fallback models
